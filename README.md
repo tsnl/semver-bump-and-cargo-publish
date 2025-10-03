@@ -143,13 +143,17 @@ jobs:
 You need to set up the following secrets in your repository:
 
 1. **`CARGO_REGISTRY_TOKEN`**: Your crates.io API token
-   - Get this from [crates.io/me](https://crates.io/me)
-   - Go to Account Settings → API Tokens → New Token
+    - Get this from [crates.io/me](https://crates.io/me)
+    - Go to Account Settings → API Tokens → New Token
 
-2. **`PAT_TOKEN`**: GitHub Personal Access Token
-   - Go to GitHub Settings → Developer settings → Personal access tokens
-   - Create a token with `repo` scope
-   - This is needed to push commits and tags back to the repository
+2.  **`PAT_TOKEN`**: GitHub Personal Access Token
+    - Go to GitHub Settings → Developer settings → Personal access tokens
+    - Create a fine-grained token with the following:
+      - Repository access: Select your repository, only the one where this action runs.
+      - Scopes:
+        - `repo` scope (read + write)
+        - `metadata` scope (read-only)
+    - This is needed to push commits and tags back to the repository
 
 ### Required Permissions
 
