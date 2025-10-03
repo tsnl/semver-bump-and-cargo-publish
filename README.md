@@ -14,6 +14,14 @@ A GitHub Action that automatically bumps the version of a Rust crate according t
 - 🛠️ Built-in Rust toolchain management
 - 📋 Comprehensive validation and testing
 
+## Limitations
+
+- You need to manually create a GitHub release from each tag.
+- No automatic release notes management.
+- Only supports crates.io as the registry.
+- Only supports packages with a single crate in the root directory.
+- **SECURITY:** requires you to add a PAT to your repository secrets with write access to the repo.
+
 ## Usage
 
 ### Basic Usage
@@ -46,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - name: Publish crate
         uses: your-username/semver-bump-and-cargo-publish@v1
         with:
@@ -86,7 +94,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - name: Publish crate
         uses: your-username/semver-bump-and-cargo-publish@v1
         with:
