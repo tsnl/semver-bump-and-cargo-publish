@@ -20,6 +20,7 @@ A GitHub Action that automatically bumps the version of a Rust crate according t
 - No automatic release notes management.
 - Only supports crates.io as the registry.
 - Only supports packages with a single crate in the root directory.
+- Little to no built-in CI checks: this keeps costs down and avoids complexity, but you should have your own CI checks in place.
 - **SECURITY:** requires you to add a PAT to your repository secrets with write access to the repo.
 
 ## Usage
@@ -173,18 +174,18 @@ The action can wait for specific GitHub status checks to pass before proceeding 
 
 To find the correct status check names for the `wait_for_checks` input:
 
-1. Go to a recent commit in your repository
-2. Click on the status checks (✅ or ❌ icon)
-3. The names shown are what you should use in `wait_for_checks`
+1.  Go to a recent commit in your repository.
+2.  Click on the status checks (✅ or ❌ icon).
+3.  The names shown are what you should use in `wait_for_checks`
 
 For GitHub Actions workflows, the format is typically:
 - `{workflow_name} / {job_name}`
-- Example: `CI / Test`, `CI / Lint`
+- Example: `test`, `lint`, `Check Formatting`, etc.
 
 ### Example with Common CI Checks
 
 ```yaml
-wait_for_checks: "CI / Test, CI / Lint, CI / Check Formatting"
+wait_for_checks: "test; lint; Check Formatting"
 ```
 
 ## Workflow Logic

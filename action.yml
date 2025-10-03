@@ -144,7 +144,6 @@ runs:
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: ${{ inputs.rust_toolchain }}
-        components: clippy, rustfmt
 
     - name: Cache cargo dependencies
       uses: actions/cache@v4
@@ -238,18 +237,6 @@ runs:
           exit 1
         fi
         echo "✅ Version update verified: $NEW_VERSION_CHECK"
-
-    - name: Run tests
-      shell: bash
-      run: cargo test --verbose
-
-    - name: Run clippy
-      shell: bash
-      run: cargo clippy --all-targets --all-features -- -D warnings
-
-    - name: Check formatting
-      shell: bash
-      run: cargo fmt -- --check
 
     - name: Build package
       shell: bash
