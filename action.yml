@@ -1,0 +1,350 @@
+name: "Semver Bump and Cargo Publish"
+description: "Automatically bump semantic version and publish Rust crate to crates.io"
+author: "Nikhil Idiculla"
+
+inputs:
+  branch:
+    description: "Branch to publish from"
+    required: true
+    default: "main"
+  bump_type:
+    description: "Version bump type (patch, minor, major)"
+    required: true
+    default: "patch"
+  dry_run:
+    description: "Dry run: skip automated commit, push, and publish"
+    required: false
+    default: "true"
+  cargo_registry_token:
+    description: "Cargo registry token for publishing to crates.io"
+    required: true
+  pat_token:
+    description: "Personal access token for pushing to repository"
+    required: true
+  rust_toolchain:
+    description: "Rust toolchain version to use"
+    required: false
+    default: "nightly-2025-09-30"
+  git_user_email:
+    description: "Git user email for commits"
+    required: false
+    default: "github-actions@github.com"
+  git_user_name:
+    description: "Git user name for commits"
+    required: false
+    default: "GitHub Actions"
+  wait_for_checks:
+    description: "Comma-separated list of status check contexts to wait for"
+    required: false
+    default: ""
+  check_wait_interval:
+    description: "Time to wait between status check polling (in seconds)"
+    required: false
+    default: "60"
+  check_timeout_count:
+    description: "Number of times to poll status checks before timing out"
+    required: false
+    default: "20"
+
+outputs:
+  package_name:
+    description: "Name of the published package"
+    value: ${{ steps.package_info.outputs.name }}
+  old_version:
+    description: "Previous version before bump"
+    value: ${{ steps.package_info.outputs.current }}
+  new_version:
+    description: "New version after bump"
+    value: ${{ steps.bump_version.outputs.new_version }}
+  tag_name:
+    description: "Git tag name created"
+    value: ${{ steps.bump_version.outputs.tag_name }}
+  published:
+    description: "Whether the package was actually published to crates.io"
+    value: ${{ steps.publish.outputs.published }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [[ "${{ inputs.bump_type }}" != "patch" && "${{ inputs.bump_type }}" != "minor" && "${{ inputs.bump_type }}" != "major" ]]; then
+          echo "❌ Invalid bump_type: ${{ inputs.bump_type }}. Must be one of: patch, minor, major"
+          exit 1
+        fi
+        echo "✅ Input validation passed"
+
+    - name: Wait for status checks
+      if: ${{ inputs.wait_for_checks != '' }}
+      shell: bash
+      run: |
+        IFS=',' read -ra CHECKS <<< "${{ inputs.wait_for_checks }}"
+        for check in "${CHECKS[@]}"; do
+          check=$(echo "$check" | xargs)  # trim whitespace
+          echo "🔍 Waiting for status check: $check"
+
+          max_attempts=${{ inputs.check_timeout_count }}
+          attempt=1
+
+          while [ $attempt -le $max_attempts ]; do
+            echo "Attempt $attempt/$max_attempts for check: $check"
+
+            # First try GitHub Actions check runs (for workflow jobs)
+            status=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs \
+              --jq ".check_runs[] | select(.name == \"$check\") | .conclusion" 2>/dev/null || echo "")
+
+            # If not found in check runs, try legacy status API (for external CI)
+            if [ -z "$status" ]; then
+              status=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/status \
+                --jq ".statuses[] | select(.context == \"$check\") | .state" 2>/dev/null || echo "")
+            fi
+
+            # Handle different status values
+            if [ "$status" = "success" ]; then
+              echo "✅ Status check '$check' passed"
+              break
+            elif [ "$status" = "failure" ] || [ "$status" = "error" ]; then
+              echo "❌ Status check '$check' failed with state: $status"
+              exit 1
+            elif [ "$status" = "pending" ] || [ "$status" = "in_progress" ] || [ "$status" = "queued" ]; then
+              echo "⏳ Status check '$check' is still running (status: $status), waiting..."
+            elif [ -z "$status" ]; then
+              echo "⚠️  Status check '$check' not found, checking if workflow is still running..."
+
+              # Check if any workflows are still running
+              running_workflows=$(gh api repos/${{ github.repository }}/actions/runs \
+                --jq ".workflow_runs[] | select(.head_sha == \"${{ github.sha }}\" and .status == \"in_progress\") | .name" 2>/dev/null | wc -l)
+
+              if [ "$running_workflows" -gt 0 ]; then
+                echo "⏳ Workflows still running for this commit, waiting..."
+              else
+                echo "⚠️  No running workflows found, check may not exist or may have completed"
+              fi
+            else
+              echo "⚠️  Status check '$check' has unknown state: $status, waiting..."
+            fi
+
+            if [ $attempt -eq $max_attempts ]; then
+              echo "❌ Timeout waiting for status check '$check'"
+              echo "💡 Make sure the check name exactly matches what appears in GitHub"
+              echo "💡 For GitHub Actions, use format: 'workflow_name / job_name'"
+              exit 1
+            fi
+
+            sleep ${{ inputs.check_wait_interval }}
+            attempt=$((attempt + 1))
+          done
+        done
+        echo "✅ All required status checks passed"
+      env:
+        GH_TOKEN: ${{ inputs.pat_token }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust_toolchain }}
+        components: clippy, rustfmt
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Cache cargo tools
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin
+        key: cargo-tools-${{ runner.os }}-semver-bump-1.0.1-tomato-toml-1.0.0
+
+    - name: Install cargo tools
+      shell: bash
+      run: |
+        if ! command -v semver-bump &> /dev/null; then
+          cargo install semver-bump --version 1.0.1
+        fi
+        if ! command -v tomato &> /dev/null; then
+          cargo install tomato-toml --version 1.0.0
+        fi
+
+    - name: Validate tokens
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.cargo_registry_token }}" ]; then
+          echo "⚠️  cargo_registry_token input is not set"
+          exit 1
+        fi
+        if [ -z "${{ inputs.pat_token }}" ]; then
+          echo "⚠️  pat_token input is not set"
+          exit 1
+        fi
+        echo "✅ All required tokens are configured"
+
+    - name: Get package info
+      id: package_info
+      shell: bash
+      run: |
+        PACKAGE_NAME=$(tomato get package.name Cargo.toml)
+        CURRENT_VERSION=$(tomato get package.version Cargo.toml)
+        echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+        echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "Package: $PACKAGE_NAME"
+        echo "Current version: $CURRENT_VERSION"
+
+    - name: Bump version and check tag
+      id: bump_version
+      shell: bash
+      run: |
+        CURRENT_VERSION=$(tomato get package.version Cargo.toml)
+        NEW_VERSION=$(echo "$CURRENT_VERSION" | semver-bump ${{ inputs.bump_type }})
+
+        if [ "${{ inputs.branch }}" = "main" ]; then
+          TAG_NAME="v$NEW_VERSION"
+        else
+          TAG_NAME="${{ inputs.branch }}-v$NEW_VERSION"
+        fi
+
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+        # Check if tag already exists
+        if git tag -l | grep -q "^$TAG_NAME$"; then
+          echo "❌ Tag $TAG_NAME already exists!"
+          exit 1
+        fi
+
+        # Bump version in Cargo.toml
+        tomato set package.version "$NEW_VERSION" Cargo.toml
+        echo "✅ Bumped version from $CURRENT_VERSION to $NEW_VERSION"
+
+    - name: Update Cargo.lock
+      shell: bash
+      run: |
+        cargo update -p ${{ steps.package_info.outputs.name }}
+        echo "✅ Updated Cargo.lock"
+
+    - name: Verify version change
+      shell: bash
+      run: |
+        NEW_VERSION_CHECK=$(tomato get package.version Cargo.toml)
+        if [ "$NEW_VERSION_CHECK" != "${{ steps.bump_version.outputs.new_version }}" ]; then
+          echo "❌ Version update failed. Expected ${{ steps.bump_version.outputs.new_version }}, got $NEW_VERSION_CHECK"
+          exit 1
+        fi
+        echo "✅ Version update verified: $NEW_VERSION_CHECK"
+
+    - name: Run tests
+      shell: bash
+      run: cargo test --verbose
+
+    - name: Run clippy
+      shell: bash
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Check formatting
+      shell: bash
+      run: cargo fmt -- --check
+
+    - name: Build package
+      shell: bash
+      run: cargo build --release
+
+    - name: Configure git
+      shell: bash
+      run: |
+        git config --local user.email "${{ inputs.git_user_email }}"
+        git config --local user.name "${{ inputs.git_user_name }}"
+        git remote set-url origin https://x-access-token:${{ inputs.pat_token }}@github.com/${{ github.repository }}.git
+
+    - name: Commit version bump (but don't push yet)
+      shell: bash
+      run: |
+        git add Cargo.toml Cargo.lock
+        git commit -m "Bump version to ${{ steps.bump_version.outputs.tag_name }}"
+        git tag "${{ steps.bump_version.outputs.tag_name }}"
+        echo "✅ Created commit and tag for ${{ steps.bump_version.outputs.tag_name }}"
+
+    - name: Dry run publish
+      shell: bash
+      run: |
+        cargo publish --dry-run
+        echo "✅ Dry run publish succeeded"
+
+    - name: Push changes since dry run publish succeeded
+      if: ${{ inputs.dry_run != 'true' }}
+      shell: bash
+      run: |
+        git push origin ${{ inputs.branch }}
+        git push origin "${{ steps.bump_version.outputs.tag_name }}"
+        echo "✅ Pushed changes and tag to repository"
+
+    - name: Publish to crates.io
+      if: ${{ inputs.dry_run != 'true' && inputs.branch == 'main' }}
+      id: publish
+      shell: bash
+      run: |
+        cargo publish
+        echo "published=true" >> $GITHUB_OUTPUT
+        echo "✅ Published to crates.io"
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ inputs.cargo_registry_token }}
+      continue-on-error: true
+
+    - name: Set publish output for non-main or dry-run
+      if: ${{ inputs.dry_run == 'true' || inputs.branch != 'main' }}
+      shell: bash
+      run: |
+        echo "published=false" >> $GITHUB_OUTPUT
+
+    - name: Rollback if publish failed
+      if: ${{ inputs.dry_run != 'true' && inputs.branch == 'main' && steps.publish.outcome == 'failure' }}
+      shell: bash
+      run: |
+        echo "🔄 Publishing failed, rolling back changes..."
+
+        # Delete the tag locally and remotely
+        git tag -d "${{ steps.bump_version.outputs.tag_name }}"
+        git push origin --delete "${{ steps.bump_version.outputs.tag_name }}" || echo "Tag may not exist on remote"
+
+        # Reset to previous commit (undo version bump commit)
+        git reset --hard HEAD~1
+
+        # Force push to revert the commit on main
+        git push --force-with-lease origin ${{ inputs.branch }}
+
+        echo "❌ Rollback completed. Version bump and tag have been reverted."
+        exit 1
+
+    - name: Explain skip publish if non-main branch
+      if: ${{ inputs.dry_run != 'true' && inputs.branch != 'main' }}
+      shell: bash
+      run: |
+        echo "⚠️  Skipping cargo publish because this is not the main branch"
+        echo "cargo publish can only be run from the main branch"
+        echo "Current branch: ${{ inputs.branch }}"
+
+    - name: Summarize dry run
+      if: ${{ inputs.dry_run == 'true' }}
+      shell: bash
+      run: |
+        echo "🔍 DRY RUN COMPLETED"
+        echo "Package: ${{ steps.package_info.outputs.name }}"
+        echo "Branch: ${{ inputs.branch }}"
+        echo "Version would be bumped from ${{ steps.package_info.outputs.current }} to ${{ steps.bump_version.outputs.new_version }}"
+        echo "Changes would be committed and tagged as ${{ steps.bump_version.outputs.tag_name }}"
+        if [ "${{ inputs.branch }}" = "main" ]; then
+          echo "Package would be published to crates.io"
+        else
+          echo "Package would NOT be published to crates.io (non-main branch)"
+        fi
+        echo "No actual changes were made to the repository or crates.io"
+
+branding:
+  icon: "package"
+  color: "orange"
