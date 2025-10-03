@@ -41,7 +41,7 @@ jobs:
 
       - name: Publish crate using semver-bump-and-cargo-publish
         id: publish
-        uses: your-username/semver-bump-and-cargo-publish@v1
+        uses: tsnl/semver-bump-and-cargo-publish@v1
         with:
           branch: ${{ github.event.inputs.branch }}
           bump_type: ${{ github.event.inputs.bump_type }}

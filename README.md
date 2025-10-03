@@ -56,7 +56,7 @@ jobs:
           fetch-depth: 0
 
       - name: Publish crate
-        uses: your-username/semver-bump-and-cargo-publish@v1
+        uses: tsnl/semver-bump-and-cargo-publish@v1
         with:
           bump_type: ${{ github.event.inputs.bump_type }}
           dry_run: ${{ github.event.inputs.dry_run }}
@@ -96,7 +96,7 @@ jobs:
           fetch-depth: 0
 
       - name: Publish crate
-        uses: your-username/semver-bump-and-cargo-publish@v1
+        uses: tsnl/semver-bump-and-cargo-publish@v1
         with:
           bump_type: ${{ github.event.inputs.bump_type }}
           dry_run: ${{ github.event.inputs.dry_run }}
@@ -231,7 +231,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: your-username/semver-bump-and-cargo-publish@v1
+      - uses: tsnl/semver-bump-and-cargo-publish@v1
         with:
           bump_type: "minor"
           dry_run: "false"
@@ -258,7 +258,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: your-username/semver-bump-and-cargo-publish@v1
+      - uses: tsnl/semver-bump-and-cargo-publish@v1
         with:
           bump_type: ${{ github.event.inputs.version }}
           dry_run: "false"
