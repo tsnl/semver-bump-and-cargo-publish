@@ -2,6 +2,11 @@
 
 A GitHub Action that automatically bumps the version of a Rust crate according to semantic versioning rules and publishes it to crates.io.
 
+Quick recap of semver rules:
+- Bump `major` if you make incompatible API changes.
+- Bump `minor` if you add functionality in a backwards-compatible manner.
+- Bump `patch` if you make backwards-compatible bug fixes.
+
 ## Features
 
 - 🔄 Automatic semantic version bumping (patch, minor, major)
