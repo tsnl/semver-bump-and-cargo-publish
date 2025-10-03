@@ -79,7 +79,7 @@ runs:
       if: ${{ inputs.wait_for_checks != '' }}
       shell: bash
       run: |
-        IFS=',' read -ra CHECKS <<< "${{ inputs.wait_for_checks }}"
+        IFS=';' read -ra CHECKS <<< "${{ inputs.wait_for_checks }}"
         for check in "${CHECKS[@]}"; do
           check=$(echo "$check" | xargs)  # trim whitespace
           echo "🔍 Waiting for status check: $check"
