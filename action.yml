@@ -146,7 +146,7 @@ runs:
         toolchain: ${{ inputs.rust_toolchain }}
 
     - name: Cache cargo dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           ~/.cargo/registry
@@ -157,7 +157,7 @@ runs:
           ${{ runner.os }}-cargo-
 
     - name: Cache cargo tools
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.cargo/bin
         key: cargo-tools-${{ runner.os }}-semver-bump-1.0.1-tomato-toml-1.0.0
