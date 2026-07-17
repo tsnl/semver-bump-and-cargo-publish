@@ -79,9 +79,13 @@ runs:
       if: ${{ inputs.wait_for_checks != '' }}
       shell: bash
       run: |
-        IFS=';' read -ra CHECKS <<< "${{ inputs.wait_for_checks }}"
+        # Docs/examples use comma-separated names; also accept ';' as a delimiter.
+        raw="${{ inputs.wait_for_checks }}"
+        raw="${raw//;/,}"
+        IFS=',' read -ra CHECKS <<< "$raw"
         for check in "${CHECKS[@]}"; do
           check=$(echo "$check" | xargs)  # trim whitespace
+          [ -z "$check" ] && continue
           echo "🔍 Waiting for status check: $check"
 
           max_attempts=${{ inputs.check_timeout_count }}
@@ -114,7 +118,7 @@ runs:
 
               # Check if any workflows are still running
               running_workflows=$(gh api repos/${{ github.repository }}/actions/runs \
-                --jq ".workflow_runs[] | select(.head_sha == \"${{ github.sha }}\" and .status == \"in_progress\") | .name" 2>/dev/null | wc -l)
+                --jq ".workflow_runs[] | select(.head_sha == \"${{ github.sha }}\" and .status == \"in_progress\" and .name != \"Publish\") | .name" 2>/dev/null | wc -l)
 
               if [ "$running_workflows" -gt 0 ]; then
                 echo "⏳ Workflows still running for this commit, waiting..."
