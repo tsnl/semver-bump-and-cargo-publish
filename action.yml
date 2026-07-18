@@ -79,6 +79,15 @@ runs:
       if: ${{ inputs.wait_for_checks != '' }}
       shell: bash
       run: |
+        # Wait on the commit actually being published: the checked-out tip of
+        # inputs.branch, not the workflow's trigger commit (github.sha). The
+        # two differ whenever the caller dispatches from another ref, and then
+        # github.sha may have no checks at all (stalling this loop to timeout)
+        # while green checks on the trigger ref would say nothing about the
+        # code on the publish branch.
+        PUBLISH_SHA=$(git rev-parse HEAD)
+        echo "🔍 Waiting on checks for $PUBLISH_SHA (checked-out tip of '${{ inputs.branch }}')"
+
         # Docs/examples use comma-separated names; also accept ';' as a delimiter.
         raw="${{ inputs.wait_for_checks }}"
         raw="${raw//;/,}"
@@ -90,19 +99,21 @@ runs:
 
           max_attempts=${{ inputs.check_timeout_count }}
           attempt=1
+          missing_streak=0
 
           while [ $attempt -le $max_attempts ]; do
-            echo "Attempt $attempt/$max_attempts for check: $check"
+            echo "Attempt $attempt/$max_attempts for check: $check on $PUBLISH_SHA"
 
             # First try GitHub Actions check runs (for workflow jobs)
-            status=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs \
+            status=$(gh api "repos/${{ github.repository }}/commits/$PUBLISH_SHA/check-runs" \
               --jq ".check_runs[] | select(.name == \"$check\") | .conclusion" 2>/dev/null || echo "")
 
             # If not found in check runs, try legacy status API (for external CI)
             if [ -z "$status" ]; then
-              status=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/status \
+              status=$(gh api "repos/${{ github.repository }}/commits/$PUBLISH_SHA/status" \
                 --jq ".statuses[] | select(.context == \"$check\") | .state" 2>/dev/null || echo "")
             fi
+            [ -n "$status" ] && missing_streak=0
 
             # Handle different status values
             if [ "$status" = "success" ]; then
@@ -114,23 +125,32 @@ runs:
             elif [ "$status" = "pending" ] || [ "$status" = "in_progress" ] || [ "$status" = "queued" ]; then
               echo "⏳ Status check '$check' is still running (status: $status), waiting..."
             elif [ -z "$status" ]; then
-              echo "⚠️  Status check '$check' not found, checking if workflow is still running..."
+              echo "⚠️  Status check '$check' not found on $PUBLISH_SHA, checking if workflow is still running..."
 
               # Check if any workflows are still running
-              running_workflows=$(gh api repos/${{ github.repository }}/actions/runs \
-                --jq ".workflow_runs[] | select(.head_sha == \"${{ github.sha }}\" and .status == \"in_progress\" and .name != \"Publish\") | .name" 2>/dev/null | wc -l)
+              running_workflows=$(gh api "repos/${{ github.repository }}/actions/runs" \
+                --jq ".workflow_runs[] | select(.head_sha == \"$PUBLISH_SHA\" and .status == \"in_progress\" and .name != \"Publish\") | .name" 2>/dev/null | wc -l)
 
               if [ "$running_workflows" -gt 0 ]; then
                 echo "⏳ Workflows still running for this commit, waiting..."
               else
-                echo "⚠️  No running workflows found, check may not exist or may have completed"
+                # A check that hasn't registered and has nothing running that
+                # could register it will never appear; fail fast instead of
+                # burning the remaining attempts in silence.
+                missing_streak=$((missing_streak + 1))
+                echo "⚠️  No running workflows found for $PUBLISH_SHA (strike $missing_streak/3)"
+                if [ $missing_streak -ge 3 ]; then
+                  echo "❌ Status check '$check' never appeared on $PUBLISH_SHA and no workflow is running that could create it"
+                  echo "💡 Make sure CI runs for the publish branch's tip commit and the name exactly matches what appears in GitHub"
+                  exit 1
+                fi
               fi
             else
               echo "⚠️  Status check '$check' has unknown state: $status, waiting..."
             fi
 
             if [ $attempt -eq $max_attempts ]; then
-              echo "❌ Timeout waiting for status check '$check'"
+              echo "❌ Timeout waiting for status check '$check' on $PUBLISH_SHA"
               echo "💡 Make sure the check name exactly matches what appears in GitHub"
               echo "💡 For GitHub Actions, use format: 'workflow_name / job_name'"
               exit 1

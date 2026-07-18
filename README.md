@@ -175,6 +175,13 @@ permissions:
 
 The action can wait for specific GitHub status checks to pass before proceeding with the publish. This is useful for ensuring CI tests pass before publishing.
 
+Checks are awaited on the **checked-out tip of `branch`** — the commit that
+will actually be bumped and published — not on the commit that triggered the
+workflow. The two differ when the workflow is dispatched or push-triggered
+from another ref. If a named check never registers on that commit and no
+workflow is running that could still produce it, the action fails after three
+consecutive not-found polls instead of waiting out the full timeout.
+
 ### Finding Status Check Names
 
 To find the correct status check names for the `wait_for_checks` input:
